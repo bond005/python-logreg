@@ -46,7 +46,7 @@ class LogisticRegression:
         # открываем текстовый файл для записи
         with open(file_name, 'w') as fp:
             # записываем размер входного вектора признаков
-            fp.write('Input size {0}\n\n'.format(self.__a.shape[0]))
+            fp.write('Input size {0}\n\n'.format(self.__b.shape[0]))
             # записываем коэффициенты логистической регрессии
             for ind in range(self.__b.shape[0]):
                 fp.write('{0}\n'.format(self.__b[ind]))
@@ -281,12 +281,18 @@ def load_mnist_for_demo():
 
 if __name__ == '__main__':
     # если мы используем этот модуль как главный, а не просто как Python-библиотеку, то запускаем демо-пример на MNIST
+    import os.path  # импортируем стандартный модуль для работы с файлами
     train_set, test_set = load_mnist_for_demo()  # загружаем обучающие и тестовые данные MNIST
     # для 10-классовой классификации создаём 10 бинарных (2-классовых) классификаторов на основе логистической регрессии
     classifiers = list()
     for recognized_class in range(10):
+        classifier_name = 'log_reg_for_MNIST_{0}.txt'.format(recognized_class)
         new_classifier = LogisticRegression()
-        new_classifier.fit(train_set[0], (train_set[1] == recognized_class).astype(numpy.float))
+        if os.path.exists(classifier_name):
+            new_classifier.load(classifier_name)
+        else:
+            new_classifier.fit(train_set[0], (train_set[1] == recognized_class).astype(numpy.float))
+            new_classifier.save(classifier_name)
         classifiers.append(new_classifier)
     # на тестовом множестве вычисляем результаты распознавания цифр коллективом из 10 обученных логистических регрессий
     # (принцип принятия решений таким коллективом: входной вектор признаков считается отнесённым к тому классу, чья

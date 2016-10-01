@@ -1,5 +1,7 @@
+import functools
 import math  # импортируем стандартную питоновскую библиотеку для математики
 import numpy  # импортируем библиотеку NumPy для работы с NumPy-массивами класса numpy.ndarray
+import scipy.sparse  # импортируем пакет sparse библиотеки SciPy для работы с разреженными матрицами
 
 
 class LogRegError(Exception):
@@ -105,10 +107,11 @@ class LogisticRegression:
         if (self.__a is None) or (self.__b is None):
             raise LogRegError('Parameters have not been specified!')
         # проверить, что корректно задана входная матрица X
-        if (X is None) or (not isinstance(X, numpy.ndarray)) or (X.ndim != 2) or (X.shape[1] != self.__b.shape[0]):
+        if (X is None) or ((not isinstance(X, numpy.ndarray)) and (not isinstance(X, scipy.sparse.spmatrix))) or\
+                (X.ndim != 2) or (X.shape[1] != self.__b.shape[0]):
             raise LogRegError('Input data are wrong!')
         # вычислить искомый массив вероятностей
-        return 1.0 / (1.0 + numpy.exp(-numpy.dot(X, self.__b) - self.__a))
+        return 1.0 / (1.0 + numpy.exp(-X.dot(self.__b) - self.__a))
 
     def predict(self, X):
         """ Распознать, к какому из двух классов относятся входные объекты.
@@ -140,8 +143,9 @@ class LogisticRegression:
         обучение всё равно прекращается.
         """
         # проверяем, правильно ли задано обучающее множество (если нет, то генерируем исключение)
-        if (X is None) or (y is None) or (not isinstance(X, numpy.ndarray)) or (X.ndim != 2) or\
-                (not isinstance(y, numpy.ndarray)) or (y.ndim != 1) or (X.shape[0] != y.shape[0]):
+        if (X is None) or (y is None) or ((not isinstance(X, numpy.ndarray)) and
+                                              (not isinstance(X, scipy.sparse.spmatrix))) or\
+                (X.ndim != 2) or (not isinstance(y, numpy.ndarray)) or (y.ndim != 1) or (X.shape[0] != y.shape[0]):
             raise LogRegError('Train data are wrong!')
         # проверяем, правильно ли заданы параметры алгоритма обучения (если нет, то генерируем исключение)
         if (eps <= 0.0) or (lr_max <= 0.0) or (max_iters < 1):
@@ -177,8 +181,7 @@ class LogisticRegression:
             print('The algorithm is stopped owing to very small changes of log-likelihood function.')
         else:
             print('The algorithm is stopped after the maximum number of iterations.')
-        #self.__th = self.__calc_best_th(y, self.predict(X))
-        self.__th = 0.5
+        self.__th = self.__calc_best_th(y, self.transform(X))
 
     def __calculate_log_likelihood(self, X, y, a, b):
         """ Вычислить логарифм функции правдоподобия на заданном обучающем множестве для заданных параметров регрессии
@@ -195,7 +198,7 @@ class LogisticRegression:
         :return Логарифм функции правдоподобия.
         """
         eps = 0.000001  # малое число, предотвращающее появление нуля под логарифмом
-        p = 1.0 / (1.0 + numpy.exp(-numpy.dot(X, b) - a))
+        p = 1.0 / (1.0 + numpy.exp(-X.dot(b) - a))
         return numpy.sum(y * numpy.log(p + eps) + (1.0 - y) * numpy.log(1.0 - p + eps))
 
     def __calculate_gradient(self, X, y):
@@ -211,9 +214,9 @@ class LogisticRegression:
         элементом - вектор частных производных по соответствующим коэффициентам регрессии (одномерный
         numpy.ndarray-массив вещественных чисел).
         """
-        p = 1.0 / (1.0 + numpy.exp(-numpy.dot(X, self.__b) - self.__a))
+        p = 1.0 / (1.0 + numpy.exp(-X.dot(self.__b) - self.__a))
         da = numpy.sum(y - p)
-        db = numpy.sum((y - p) * numpy.transpose(X), 1)
+        db = X.transpose().dot(y - p)
         return (da, db)
 
     def __find_best_lr(self, X, y, gradient, lr_max):
@@ -251,13 +254,40 @@ class LogisticRegression:
                 lr1 = lr_max - (lr_max - lr_min) / theta
         return (lr_max - lr_min) / 2.0
 
+    def __calc_quality(self, y_target, y_real):
+        n = y_target.shape[0]
+        quality = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
+        for ind in range(n):
+            if y_target[ind] > 0.0:
+                if y_real[ind] > 0.0:
+                    quality['tp'] += 1
+                else:
+                    quality['fn'] += 1
+            else:
+                if y_real[ind] > 0.0:
+                    quality['fp'] += 1
+                else:
+                    quality['tn'] += 1
+        return quality
+
     def __calc_best_th(self, y_target, y_real):
-        pass
+        best_th = 0.0
+        min_dist = 1.0
+        for th in [0.0, 1.0]:
+            quality = self.__calc_quality(y_target, (y_real >= th).astype(numpy.float))
+            tpr = float(quality['tp']) / float(quality['tp'] + quality['fn'])
+            fpr = float(quality['fp']) / float(quality['tn'] + quality['fp'])
+            dist = math.sqrt((0.0 - fpr) * (0.0 - fpr) + (1.0 - tpr) * (1.0 - tpr))
+            if dist < min_dist:
+                min_dist = dist
+                best_th = th
+        return best_th
 
-
-def load_mnist_for_demo():
+def load_mnist_for_demo(sparse=False):
     """ Загрузить данные корпуса MNIST, чтобы продемонстрировать применение логистической регрессии для распознавания
     рукописных цифр от 0 до 9 (всего десять классов, 60 тыс. обучающих картинок и 10 тыс. тестовых картинок).
+    :param sparse - флаг, показывающий, представлять ли множество векторов признаков в виде разреженной матрицы
+    scipy.sparse.csr_matrix или же в виде обычной матрицы numpy.ndarray.
     :return Кортеж из двух элементов: обучающего и тестового множества. Каждое из множеств - как обучающее, так и
     тестовое - тоже задаётся в виде двухэлементого кортежа, первым элементом которого является множество векторов
     признаков входных объектов (двумерный numpy.ndarray-массив, число строк в котором равно числу входных объектов, а
@@ -270,11 +300,17 @@ def load_mnist_for_demo():
     mnist = fetch_mldata('MNIST original', data_home='.')
     # получаем и нормируем вектора признаков для первых 60 тыс. картинок из MNIST, используемых для обучения
     # (матрица яркостей пикселей 28x28 -> одномерный вектор 784 признаков)
-    X_train = mnist.data[0:60000].astype(numpy.float) / 255.0
+    if sparse:
+        X_train = scipy.sparse.csr_matrix(mnist.data[0:60000].astype(numpy.float) / 255.0)
+    else:
+        X_train = mnist.data[0:60000].astype(numpy.float) / 255.0
     y_train = mnist.target[0:60000]  # получаем желаемые выходы (цифры от 0 до 9) для 60 тыс. обучающих картинок
     # получаем и нормируем вектора признаков для следующих 10 тыс. картинок из MNIST, используемых для тестирования
     # (матрица яркостей пикселей 28x28 -> одномерный вектор 784 признаков)
-    X_test = mnist.data[60000:].astype(numpy.float) / 255.0
+    if sparse:
+        X_test = scipy.sparse.csr_matrix(mnist.data[60000:].astype(numpy.float) / 255.0)
+    else:
+        X_test = mnist.data[60000:].astype(numpy.float) / 255.0
     y_test = mnist.target[60000:]  # получаем желаемые выходы (цифры от 0 до 9) для 10 тыс. тестовых картинок
     return ((X_train, y_train), (X_test, y_test))
 
@@ -282,7 +318,7 @@ def load_mnist_for_demo():
 if __name__ == '__main__':
     # если мы используем этот модуль как главный, а не просто как Python-библиотеку, то запускаем демо-пример на MNIST
     import os.path  # импортируем стандартный модуль для работы с файлами
-    train_set, test_set = load_mnist_for_demo()  # загружаем обучающие и тестовые данные MNIST
+    train_set, test_set = load_mnist_for_demo(True)  # загружаем обучающие и тестовые данные MNIST
     # для 10-классовой классификации создаём 10 бинарных (2-классовых) классификаторов на основе логистической регрессии
     classifiers = list()
     for recognized_class in range(10):

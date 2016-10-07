@@ -273,7 +273,7 @@ class LogisticRegression:
     def __calc_best_th(self, y_target, y_real):
         best_th = 0.0
         min_dist = 1.0
-        for th in [0.0, 1.0]:
+        for th in map(lambda a: float(a) / 100.0, range(101)):
             quality = self.__calc_quality(y_target, (y_real >= th).astype(numpy.float))
             tpr = float(quality['tp']) / float(quality['tp'] + quality['fn'])
             fpr = float(quality['fp']) / float(quality['tn'] + quality['fp'])
